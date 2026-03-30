@@ -25,14 +25,14 @@ export interface SequencerState {
 }
 
 export const INITIAL_TRACKS: Track[] = [
-  { id: 'asteroid', name: 'ASTEROID', color: 'bg-violet-600', type: 'kick', steps: Array(16).fill(false), subdivision: '16th' },
-  { id: 'shooting_star', name: 'SHOOTING STAR', color: 'bg-purple-500', type: 'snare', steps: Array(16).fill(false), subdivision: '16th' },
-  { id: 'twinkle', name: 'TWINKLE', color: 'bg-fuchsia-400', type: 'hihat', steps: Array(16).fill(false), subdivision: '16th' },
-  { id: 'synthwave', name: 'SYNTHWAVE', color: 'bg-indigo-400', type: 'clap', steps: Array(16).fill(false), subdivision: '16th' },
+  { id: 'asteroid', name: 'ASTEROID', color: 'bg-orange-300', type: 'kick', steps: Array(16).fill(false), subdivision: '16th' },
+  { id: 'shooting_star', name: 'SHOOTING STAR', color: 'bg-yellow-200', type: 'snare', steps: Array(16).fill(false), subdivision: '16th' },
+  { id: 'twinkle', name: 'TWINKLE', color: 'bg-pink-300', type: 'hihat', steps: Array(16).fill(false), subdivision: '16th' },
+  { id: 'synthwave', name: 'SYNTHWAVE', color: 'bg-purple-300', type: 'clap', steps: Array(16).fill(false), subdivision: '16th' },
   { 
     id: 'stardust_piano', 
     name: 'STARDUST PIANO', 
-    color: 'bg-blue-500', 
+    color: 'bg-fuchsia-300', 
     type: 'piano', 
     steps: Array(16).fill(false), 
     notes: Array(16).fill(null).map(() => ['C4']),

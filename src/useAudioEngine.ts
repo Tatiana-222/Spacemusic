@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Track, Subdivision } from './types';
 
 const LOOK_AHEAD = 25.0; // How often to call scheduler (ms)
 const SCHEDULE_AHEAD_TIME = 0.1; // How far ahead to schedule audio (s)
 
-export function useAudioEngine(bpm: number, tracks: Track[]) {
+export function useAudioEngine(bpm: number, tracks: Track[], nebulaStrokes: {x: number, y: number}[][]) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [trackSteps, setTrackSteps] = useState<Record<string, number>>({});
   
@@ -13,6 +13,7 @@ export function useAudioEngine(bpm: number, tracks: Track[]) {
   const reverbGainRef = useRef<GainNode | null>(null);
   const timerIDRef = useRef<number | null>(null);
   const tracksRef = useRef(tracks);
+  const nebulaStrokesRef = useRef(nebulaStrokes);
   
   // Track-specific timing
   const trackNextNoteTimeRef = useRef<Record<string, number>>({});
@@ -21,6 +22,10 @@ export function useAudioEngine(bpm: number, tracks: Track[]) {
   useEffect(() => {
     tracksRef.current = tracks;
   }, [tracks]);
+
+  useEffect(() => {
+    nebulaStrokesRef.current = nebulaStrokes;
+  }, [nebulaStrokes]);
 
   const createReverbBuffer = (ctx: AudioContext) => {
     const length = ctx.sampleRate * 2.5; // 2.5 seconds reverb
@@ -35,7 +40,7 @@ export function useAudioEngine(bpm: number, tracks: Track[]) {
     return buffer;
   };
 
-  const initAudio = () => {
+  const initAudio = useCallback(() => {
     if (!audioContextRef.current) {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       audioContextRef.current = ctx;
@@ -56,7 +61,7 @@ export function useAudioEngine(bpm: number, tracks: Track[]) {
     if (audioContextRef.current.state === 'suspended') {
       audioContextRef.current.resume();
     }
-  };
+  }, []);
 
   const noteToFreq = (note: string) => {
     const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -65,7 +70,7 @@ export function useAudioEngine(bpm: number, tracks: Track[]) {
     return 440 * Math.pow(2, (octave - 4) + (key - 9) / 12);
   };
 
-  const playSound = (type: string, time: number, notes?: string[]) => {
+  const playSound = useCallback((type: string, time: number, notes?: string[]) => {
     const ctx = audioContextRef.current;
     const reverb = reverbNodeRef.current;
     if (!ctx || !reverb) return;
@@ -84,160 +89,126 @@ export function useAudioEngine(bpm: number, tracks: Track[]) {
 
     switch (type) {
       case 'kick': {
-        // CYBERJAZZ KICK: Deep sub with FM grit
+        // Standard 808 Kick
         const osc = ctx.createOscillator();
-        const mod = ctx.createOscillator();
-        const modGain = ctx.createGain();
         const gain = ctx.createGain();
         
-        osc.frequency.setValueAtTime(100, now);
-        osc.frequency.exponentialRampToValueAtTime(35, now + 0.2);
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.exponentialRampToValueAtTime(0.01, now + 0.5);
         
-        mod.frequency.setValueAtTime(150, now);
-        modGain.gain.setValueAtTime(50, now);
-        modGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        gain.gain.setValueAtTime(1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
         
-        gain.gain.setValueAtTime(0, now);
-        gain.gain.linearRampToValueAtTime(0.5, now + 0.005);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
-        
-        mod.connect(modGain);
-        modGain.connect(osc.frequency);
         osc.connect(gain);
-        
-        // Connect to destination and reverb
         gain.connect(ctx.destination);
-        gain.connect(reverb);
         
         osc.start(now);
-        mod.start(now);
-        osc.stop(now + 0.6);
-        mod.stop(now + 0.6);
+        osc.stop(now + 0.5);
         break;
       }
       case 'snare': {
-        // CYBERJAZZ SNARE: Brushing noise + resonant sweep
+        // Standard Noise Snare
         const noise = ctx.createBufferSource();
         noise.buffer = createNoiseBuffer();
-        const filter = ctx.createBiquadFilter();
-        filter.type = 'bandpass';
-        filter.frequency.setValueAtTime(1500, now);
-        filter.frequency.exponentialRampToValueAtTime(500, now + 0.2);
-        filter.Q.value = 5;
         
-        const gain = ctx.createGain();
-        gain.gain.setValueAtTime(0.5, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+        const noiseFilter = ctx.createBiquadFilter();
+        noiseFilter.type = 'highpass';
+        noiseFilter.frequency.value = 1000;
         
-        noise.connect(filter);
-        filter.connect(gain);
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.5, now);
+        noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
         
-        gain.connect(ctx.destination);
-        gain.connect(reverb);
+        const osc = ctx.createOscillator();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(250, now);
+        
+        const oscGain = ctx.createGain();
+        oscGain.gain.setValueAtTime(0.5, now);
+        oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        
+        noise.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        osc.connect(oscGain);
+        
+        noiseGain.connect(ctx.destination);
+        oscGain.connect(ctx.destination);
         
         noise.start(now);
-        noise.stop(now + 0.25);
+        osc.start(now);
+        noise.stop(now + 0.2);
+        osc.stop(now + 0.2);
         break;
       }
       case 'hihat': {
-        // CYBERJAZZ TWINKLE: FM Bell
-        const carrier = ctx.createOscillator();
-        const modulator = ctx.createOscillator();
-        const modGain = ctx.createGain();
+        // Standard Noise Hihat
+        const noise = ctx.createBufferSource();
+        noise.buffer = createNoiseBuffer();
+        
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'highpass';
+        filter.frequency.value = 7000;
+        
         const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
         
-        carrier.frequency.value = 8000;
-        modulator.frequency.value = 3500;
-        modGain.gain.value = 2000;
-        
-        gain.gain.setValueAtTime(0, now);
-        gain.gain.linearRampToValueAtTime(0.5, now + 0.002);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-        
-        modulator.connect(modGain);
-        modGain.connect(carrier.frequency);
-        carrier.connect(gain);
-        
+        noise.connect(filter);
+        filter.connect(gain);
         gain.connect(ctx.destination);
-        gain.connect(reverb);
         
-        carrier.start(now);
-        modulator.start(now);
-        carrier.stop(now + 0.15);
-        modulator.stop(now + 0.15);
+        noise.start(now);
+        noise.stop(now + 0.05);
         break;
       }
       case 'clap': {
-        // CYBERJAZZ SYNTH: Jazzy chords (Cm9/F13 vibes)
-        const chord = [261.63, 311.13, 392.00, 466.16, 523.25]; // C, Eb, G, Bb, D (Cm9)
-        chord.forEach((freq, i) => {
+        // Standard Noise Clap
+        const noise = ctx.createBufferSource();
+        noise.buffer = createNoiseBuffer();
+        
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 1200;
+        filter.Q.value = 1;
+        
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(ctx.destination);
+        
+        noise.start(now);
+        noise.stop(now + 0.3);
+        break;
+      }
+      case 'piano': {
+        // Harmonized Melodic Piano
+        const pianoNotes = notes || ['C4'];
+        pianoNotes.forEach(note => {
+          const freq = noteToFreq(note);
           const osc = ctx.createOscillator();
-          osc.type = i % 2 === 0 ? 'sawtooth' : 'square';
-          osc.frequency.value = freq;
-          
-          const filter = ctx.createBiquadFilter();
-          filter.type = 'lowpass';
-          filter.frequency.setValueAtTime(3000, now);
-          filter.frequency.exponentialRampToValueAtTime(400, now + 0.5);
-          filter.Q.value = 8;
-          
           const gain = ctx.createGain();
+          
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now);
+          
           gain.gain.setValueAtTime(0, now);
-          gain.gain.linearRampToValueAtTime(0.1, now + 0.02); // 0.1 * 5 = 0.5 total
-          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+          gain.gain.linearRampToValueAtTime(0.3, now + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 1.5);
           
-          osc.connect(filter);
-          filter.connect(gain);
-          
+          osc.connect(gain);
           gain.connect(ctx.destination);
           gain.connect(reverb);
           
           osc.start(now);
-          osc.stop(now + 0.6);
-        });
-        break;
-      }
-      case 'piano': {
-        // STARDUST PIANO: FM Piano synthesis
-        const pianoNotes = notes || ['C4'];
-        pianoNotes.forEach(note => {
-          const freq = noteToFreq(note);
-          
-          // Carrier
-          const carrier = ctx.createOscillator();
-          carrier.type = 'sine';
-          carrier.frequency.setValueAtTime(freq, now);
-          
-          // Modulator
-          const modulator = ctx.createOscillator();
-          modulator.type = 'sine';
-          modulator.frequency.setValueAtTime(freq * 2, now);
-          
-          const modGain = ctx.createGain();
-          modGain.gain.setValueAtTime(freq * 0.5, now);
-          modGain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
-          
-          const gain = ctx.createGain();
-          gain.gain.setValueAtTime(0, now);
-          gain.gain.linearRampToValueAtTime(0.5, now + 0.01);
-          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
-          
-          modulator.connect(modGain);
-          modGain.connect(carrier.frequency);
-          carrier.connect(gain);
-          
-          gain.connect(ctx.destination);
-          gain.connect(reverb);
-          
-          carrier.start(now);
-          modulator.start(now);
-          carrier.stop(now + 0.8);
-          modulator.stop(now + 0.8);
+          osc.stop(now + 1.5);
         });
         break;
       }
     }
-  };
+  }, []);
 
   const getStepDuration = (subdivision: Subdivision, bpm: number) => {
     const secondsPerBeat = 60.0 / bpm;
@@ -249,11 +220,59 @@ export function useAudioEngine(bpm: number, tracks: Track[]) {
     }
   };
 
-  const scheduler = () => {
+  const playLiveSound = useCallback((x: number, y: number, time?: number) => {
+    initAudio();
+    const ctx = audioContextRef.current;
+    const reverb = reverbNodeRef.current;
+    if (!ctx || !reverb) return;
+
+    const now = time || ctx.currentTime;
+    
+    // C Minor Pentatonic Scale
+    const scale = [130.81, 155.56, 174.61, 196.00, 233.08, 261.63, 311.13, 349.23, 392.00, 466.16, 523.25];
+    const index = Math.floor((1 - y) * scale.length);
+    const freq = scale[Math.min(index, scale.length - 1)];
+    const pan = (x * 2) - 1;
+
+    const osc = ctx.createOscillator();
+    const panner = ctx.createStereoPanner();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    // Use triangle for a more "marked" sound than sine
+    osc.type = 'triangle';
+    // Fast pitch slide for a "plucked" attack character
+    osc.frequency.setValueAtTime(freq * 1.5, now);
+    osc.frequency.exponentialRampToValueAtTime(freq, now + 0.05);
+    
+    // Resonant filter for a "sharper" character
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(4000, now);
+    filter.frequency.exponentialRampToValueAtTime(1000, now + 0.2);
+    filter.Q.setValueAtTime(5, now);
+
+    panner.pan.setValueAtTime(pan, now);
+
+    // Louder and sharper attack
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.5, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+
+    osc.connect(filter);
+    filter.connect(panner);
+    panner.connect(gain);
+    gain.connect(ctx.destination);
+    gain.connect(reverb);
+
+    osc.start(now);
+    osc.stop(now + 0.8);
+  }, [initAudio]);
+
+  const scheduler = useCallback(() => {
     const ctx = audioContextRef.current;
     if (!ctx) return;
 
-    tracksRef.current.forEach(track => {
+    tracksRef.current.forEach((track, trackIndex) => {
       let nextTime = trackNextNoteTimeRef.current[track.id] || ctx.currentTime;
       
       while (nextTime < ctx.currentTime + SCHEDULE_AHEAD_TIME) {
@@ -261,6 +280,21 @@ export function useAudioEngine(bpm: number, tracks: Track[]) {
         
         if (track.steps[step]) {
           playSound(track.type, nextTime, track.notes?.[step] || undefined);
+        }
+
+        // Play nebula sound for the first track's timing (as a master clock)
+        if (trackIndex === 0 && nebulaStrokesRef.current.length > 0) {
+          const sliceWidth = 1 / 16;
+          const sliceStart = step * sliceWidth;
+          const sliceEnd = (step + 1) * sliceWidth;
+          
+          // Flatten all strokes into one array of points for the scheduler
+          const allPoints = nebulaStrokesRef.current.flat();
+          const pointsInSlice = allPoints.filter(p => p.x >= sliceStart && p.x < sliceEnd);
+          if (pointsInSlice.length > 0) {
+            const avgY = pointsInSlice.reduce((sum, p) => sum + p.y, 0) / pointsInSlice.length;
+            playLiveSound(pointsInSlice[0].x, avgY, nextTime);
+          }
         }
         
         const duration = getStepDuration(track.subdivision, bpm);
@@ -276,9 +310,9 @@ export function useAudioEngine(bpm: number, tracks: Track[]) {
     });
 
     timerIDRef.current = window.setTimeout(scheduler, LOOK_AHEAD);
-  };
+  }, [bpm, playSound, playLiveSound]);
 
-  const togglePlay = () => {
+  const togglePlay = useCallback(() => {
     initAudio();
     if (isPlaying) {
       if (timerIDRef.current) clearTimeout(timerIDRef.current);
@@ -302,7 +336,92 @@ export function useAudioEngine(bpm: number, tracks: Track[]) {
       setIsPlaying(true);
       scheduler();
     }
-  };
+  }, [isPlaying, scheduler, initAudio]);
 
-  return { isPlaying, trackSteps, togglePlay };
+  const playImpactSound = useCallback(() => {
+    initAudio();
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    // Harmonized blip (G5)
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(783.99, now);
+    osc.frequency.exponentialRampToValueAtTime(400, now + 0.1);
+
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.1);
+  }, [initAudio]);
+
+  const playShootingStarImpact = useCallback((index: number) => {
+    initAudio();
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    // 4 different basic beats for impacts
+    const freqs = [60, 150, 800, 1200];
+    const types: OscillatorType[] = ['sine', 'triangle', 'square', 'sawtooth'];
+    
+    osc.type = types[index % 4];
+    osc.frequency.setValueAtTime(freqs[index % 4], now);
+    osc.frequency.exponentialRampToValueAtTime(10, now + 0.1);
+
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.1);
+  }, [initAudio]);
+
+  const playShootingStarDistance = useCallback((index: number) => {
+    initAudio();
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    // 4 different melodic synth wave sounds (C Minor Pentatonic)
+    const scale = [261.63, 311.13, 392.00, 466.16]; // C4, Eb4, G4, Bb4
+    const freq = scale[index % 4];
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(freq, now);
+    
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(2000, now);
+    filter.frequency.exponentialRampToValueAtTime(500, now + 0.2);
+
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.2, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    if (reverbNodeRef.current) gain.connect(reverbNodeRef.current);
+
+    osc.start(now);
+    osc.stop(now + 0.2);
+  }, [initAudio]);
+
+  return { isPlaying, trackSteps, togglePlay, playLiveSound, playImpactSound, playShootingStarImpact, playShootingStarDistance };
 }
